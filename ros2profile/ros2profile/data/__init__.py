@@ -218,14 +218,11 @@ def _build_publishers(
             # logging.debug("Could not associate rmw publisher with publisher", event)
             continue
         found_pub.add_stamp("rmw_init_time", event["_timestamp"])
-        found_pub.gid = [*event["gid"]][0:16]
+        found_pub.gid = event["gid"]
 
     for event in dds_events:
         found_pub = graph.publisher_by_gid(event["gid"])
         if found_pub is None:
-            # logging.debug(
-            #    "Could not associate dds writer publisher with publisher", event
-            # )
             continue
 
         found_pub.add_stamp("dds_init_time", event["_timestamp"])
@@ -298,7 +295,7 @@ def _build_subscriptions(
             continue
 
         found_sub.add_stamp("rmw_init_time", event["_timestamp"])
-        found_sub.gid = [*event["gid"]][0:16]
+        found_sub.gid = event["gid"]
 
     for event in dds_events:
         found_sub = graph.subscription_by_gid(event["gid"])
@@ -417,17 +414,11 @@ def _build_publish_events(
         event_stream = sorted(event_stream, key=lambda x: (x["_timestamp"]))
         cur_event = None
         for entry in event_stream:
-            if not cur_event:
-                if entry["_name"] in [constants.RCLCPP_PUBLISH, constants.RCL_PUBLISH]:
-                    cur_event = PublishEvent(entry["message"])
-                else:
-                    continue
-            if entry["_name"] == constants.RCL_PUBLISH:
-                cur_event.add_stamp(constants.RCL_PUBLISH, entry["_timestamp"])
-                cur_event.publisher_handle = entry["publisher_handle"]
-            elif entry["_name"] in [constants.RMW_PUBLISH, constants.RMW_PUBLISH]:
+            if entry["_name"] in [constants.RMW_PUBLISH, constants.RCLCPP_PUBLISH, constants.RCL_PUBLISH]:
+                cur_event = PublishEvent(entry["message"]) if not cur_event else cur_event
                 cur_event.add_stamp(entry["_name"], entry["_timestamp"])
             elif entry["_name"] == constants.DDS_WRITE:
+                cur_event = PublishEvent(entry["data"]) if not cur_event else cur_event
                 cur_event.add_stamp(constants.DDS_WRITE, entry["_timestamp"])
                 cur_event.add_stamp("timestamp", entry["timestamp"])
                 cur_event.dds_writer = entry["writer"]
@@ -437,7 +428,7 @@ def _build_publish_events(
     logger.info("Found %i publish events", len(publish_events))
 
     for pub_event in publish_events:
-        found_publisher = graph.publisher_by_handle(pub_event.publisher_handle)
+        found_publisher = graph.publisher_by_dds_writer_handle(pub_event.dds_writer)
         if found_publisher:
             pub_event.source = found_publisher
             found_publisher.events.append(pub_event)
@@ -517,7 +508,7 @@ def _build_subscription_events(
         event_stream = sorted(event_stream, key=lambda x: (x["_timestamp"]))
         cur_event = SubscriptionEvent()
         for entry in event_stream:
-            if entry["_name"] in (constants.RCLCPP_TAKE, constants.RCL_TAKE):
+            if entry["_name"] in (constants.RCLCPP_TAKE, constants.RCL_TAKE, constants.DDS_READ):
                 cur_event.add_stamp(entry["_name"], entry["_timestamp"])
             elif  entry["_name"] == constants.RMW_TAKE:
                 cur_event.add_stamp(entry["_name"], entry["_timestamp"])
@@ -525,9 +516,6 @@ def _build_subscription_events(
                 cur_event.rmw_subscription_handle = entry["rmw_subscription_handle"]
                 cur_event.source_timestamp = entry["source_timestamp"]
                 cur_event.taken = entry["taken"]
-            elif entry["_name"] == constants.DDS_READ:
-                cur_event.add_stamp(constants.DDS_READ, entry["_timestamp"])
-                cur_event.dds_reader = entry["reader"]
 
             if len(cur_event._stamps) == expected_num:
                 read_events.append(cur_event)
@@ -542,6 +530,7 @@ def _build_subscription_events(
     for read_event in read_events:
         subs_by_rmw[read_event.rmw_subscription_handle].events.append(read_event)
         read_event.source = subs_by_rmw[read_event.rmw_subscription_handle]
+        read_event.dds_reader = subs_by_rmw[read_event.rmw_subscription_handle].dds_reader_handle
 
     for subscription in graph.subscriptions:
         subscription.events.sort(key=lambda ev: ev.timestamp())

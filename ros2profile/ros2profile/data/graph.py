@@ -117,6 +117,16 @@ class Graph:
                 return publisher
         return None
 
+    def publisher_by_dds_writer_handle(self, rmw_handle: int) -> Optional[Publisher]:
+        '''
+        Get a publisher using it's rmw handle
+        '''
+        for publisher in self._publishers.values():
+            if rmw_handle == publisher.dds_writer:
+                return publisher
+        return None
+
+
     def publisher_by_gid(self, gid: List[int]) -> Optional[Publisher]:
         '''
         Get a publisher using it's DDS GUID
